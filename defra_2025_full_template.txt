@@ -1,0 +1,17 @@
+Activity,Unit,Factor (kgCO2e per unit)
+UK Electricity - location-based grid average,kWh,0.193
+Natural gas,kWh,0.183
+Passenger car - petrol, average,mile,0.280
+Passenger car - diesel, average,mile,0.300
+Passenger car - battery electric (BEV),mile,0.060
+Passenger car - hybrid,mile,0.180
+Motorcycle - average,mile,0.180
+Taxi,mile,0.300
+Rail - national rail,mile,0.041
+Bus - local,passenger mile,0.170
+Bus - coach,passenger mile,0.100
+Short-haul flight (economy),passenger km,0.158
+Long-haul flight (economy),passenger km,0.146
+Ferry - foot passenger,passenger km,0.115
+Hotel stay - average,night,16.0
+Courier - small package (road),kg_km,0.500

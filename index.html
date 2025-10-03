@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VAAMG Carbon Footprint Calculator (DOS / DEFRA 2025)</title>
+  <!-- Tailwind (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Icons (optional) -->
+  <link href="https://unpkg.com/lucide-static@0.321.0/font/lucide.css" rel="stylesheet">
+  <!-- CSV + XLSX helpers -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.1/dist/xlsx.full.min.js"></script>
+  <style>
+    /* make tables nice on small screens */
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px; }
+    th { background: #f8fafc; font-weight: 600; text-align: left; }
+    .pill { display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem; border-radius:9999px; font-size:.75rem; }
+    .pill-good { background:#ecfdf5; color:#047857; }
+    .pill-warn { background:#fff7ed; color:#9a3412; }
+    .pill-bad { background:#fef2f2; color:#b91c1c; }
+    .btn { @apply px-3 py-2 rounded-lg border bg-white hover:bg-gray-50; }
+    .btn-primary { @apply bg-blue-600 text-white border-blue-600 hover:bg-blue-700; }
+    .btn-danger { @apply bg-red-600 text-white border-red-600 hover:bg-red-700; }
+    .card { @apply bg-white rounded-2xl shadow p-4; }
+    .section { @apply space-y-3; }
+    .input { @apply border rounded-lg px-2 py-1 w-full; }
+    .select { @apply border rounded-lg px-2 py-1 w-full bg-white; }
+    .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; }
+    .grid-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:1rem; }
+    .grid-4 { display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl md:text-3xl font-bold">VAAMG Carbon Footprint Calculator <span class="text-gray-400 text-base font-normal">(DOS / DEFRA 2025)</span></h1>
+      <div class="flex gap-2">
+        <button id="btnExportData" class="btn" title="Export your inputs as JSON">Export Data</button>
+        <button id="btnImportData" class="btn" title="Import a previously exported JSON">Import Data</button>
+        <input id="importDataInput" type="file" accept="application/json" class="hidden" />
+      </div>
+    </header>
+
+    <!-- Factors Loader -->
+    <section class="card section">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <h2 class="text-xl font-semibold">1) Load DEFRA 2025 <span class="font-normal">(Full set)</span></h2>
+        <div class="flex items-center gap-2">
+          <input id="defraFile" type="file" accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden" />
+          <button id="btnLoadFile" class="btn">Load file (CSV/XLSX)</button>
+          <button id="btnClearFactors" class="btn">Clear factors</button>
+        </div>
+      </div>
+      <p class="text-sm text-gray-600">The app expects three columns: <span class="mono">Activity</span>, <span class="mono">Unit</span>, <span class="mono">Factor (kgCO2e per unit)</span>. You can paste from the official 2025 full workbook.</p>
+      <textarea id="defraPaste" class="input mono" rows="4" placeholder="Or paste CSV here (first row should include headers: Activity,Unit,Factor (kgCO2e per unit))"></textarea>
+      <div class="flex items-center gap-2">
+        <button id="btnParsePaste" class="btn">Parse pasted CSV</button>
+        <span id="factorsStatus" class="pill pill-warn">No factors loaded (using placeholders)</span>
+      </div>
+      <details class="mt-2">
+        <summary class="cursor-pointer text-sm text-gray-700">Show first 10 activities loaded</summary>
+        <div id="factorsPreview" class="mt-2 text-sm mono whitespace-pre-wrap"></div>
+      </details>
+    </section>
+
+    <!-- Inputs -->
+    <section class="card section">
+      <h2 class="text-xl font-semibold">2) Enter activity data</h2>
+
+      <nav class="flex flex-wrap gap-2 mb-2">
+        <button class="btn" data-tab="Electricity_Use">Electricity</button>
+        <button class="btn" data-tab="Gas_Use">Gas</button>
+        <button class="btn" data-tab="Business_Travel">Business travel</button>
+        <button class="btn" data-tab="Commuting">Commuting</button>
+        <button class="btn" data-tab="Cloud_Services">Cloud/IT</button>
+        <button class="btn" data-tab="Purchased_Services">Purchased services</button>
+        <button class="btn" data-tab="Hotels">Hotels</button>
+        <button class="btn" data-tab="Couriers">Couriers</button>
+      </nav>
+
+      <div id="tabs">
+        <!-- Each tab content renders here -->
+      </div>
+    </section>
+
+    <!-- Results & CRP -->
+    <section class="card section">
+      <h2 class="text-xl font-semibold">3) Results & CRP summary</h2>
+      <div class="grid-3">
+        <label class="text-sm">Baseline Year
+          <select id="baselineYear" class="select"></select>
+        </label>
+        <label class="text-sm">Most Recent Year
+          <select id="recentYear" class="select"></select>
+        </label>
+        <div class="text-sm">Status
+          <div id="statusBadge" class="pill pill-warn mt-1">Using placeholder factors</div>
+        </div>
+      </div>
+
+      <div class="overflow-auto mt-4">
+        <table id="resultsTable" class="min-w-full text-sm"></table>
+      </div>
+
+      <div class="grid-4 mt-4 text-sm">
+        <div class="card">
+          <div class="text-gray-500">Baseline Emissions (tCO2e)</div>
+          <div id="baselineTotal" class="text-xl font-semibold">–</div>
+        </div>
+        <div class="card">
+          <div class="text-gray-500">Current Emissions (tCO2e)</div>
+          <div id="currentTotal" class="text-xl font-semibold">–</div>
+        </div>
+        <div class="card">
+          <div class="text-gray-500">Reduction vs Baseline</div>
+          <div id="reductionPct" class="text-xl font-semibold">–</div>
+        </div>
+        <div class="flex items-end">
+          <button id="btnExportResults" class="btn-primary px-4 py-2 rounded-lg">Export results (CSV)</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="text-xs text-gray-500 text-center">All data saves to your browser’s localStorage. You can export/import JSON using the buttons above. This tool uses per‑unit factors from DEFRA’s 2025 full set you load. No charts (per your preference); we can add them later if needed.</footer>
+  </div>
+
+  <script>
+  // -----------------------
+  // Utility helpers
+  // -----------------------
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const deepClone = (x) => JSON.parse(JSON.stringify(x));
+  const fmt = (n, d=2) => (isFinite(n) ? Number(n).toFixed(d) : "");
+  const toNumber = (v) => {
+    const n = parseFloat(v);
+    return isFinite(n) ? n : 0;
+  };
+
+  // download helpers
+  function download(filename, text) {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadCSV(filename, rows) {
+    const headers = Object.keys(rows[0] || {});
+    const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => JSON.stringify(r[h] ?? "")).join(','))).join('\n');
+    download(filename, csv);
+  }
+
+  // -----------------------
+  // Constants and lists
+  // -----------------------
+  const YEARS = Array.from({length: 12}, (_,i) => 2024 + i); // 2024-2035
+  const MODES = ["Car - Petrol","Car - Diesel","Car - EV","Car - Hybrid","Train","Bus - Local","Bus - Coach","Taxi","Motorcycle","Short Haul Flight","Long Haul Flight","Ferry","Walking","Cycling"];
+  const UNITS = ["miles","km","nights","kg_km"]; // used variably per sheet
+  const SUPPLIERS = ["Oracle Cloud Infrastructure (OCI)","Oracle Analytics Cloud (OAC)","Oracle Fusion Applications","AWS","Microsoft Azure","Google Cloud (GCP)","Hostinger","Wix","Ionos","Other"];
+  const CATEGORIES = ["Consultancy","Subcontractor","Software","Hardware/Equipment","Training","Travel","Accommodation","Courier","Other"];
+
+  // Mode -> Emission_Factors Activity key mapping (same logic as Excel version)
+  const MODE_TO_KEY = {
+    "Car - Petrol": "Car - Petrol (kgCO2e/mile)",
+    "Car - Diesel": "Car - Diesel (kgCO2e/mile)",
+    "Car - EV": "Car - EV (kgCO2e/mile)",
+    "Car - Hybrid": "Car - Hybrid (kgCO2e/mile)",
+    "Motorcycle": "Motorcycle (kgCO2e/mile)",
+    "Taxi": "Taxi (kgCO2e/mile)",
+    "Train": "Train (kgCO2e/mile)",
+    "Bus - Local": "Bus - Local (kgCO2e/passenger mile)",
+    "Bus - Coach": "Bus - Coach (kgCO2e/passenger mile)",
+    "Short Haul Flight": "Short Haul Flight <3700km (kgCO2e/passenger km)",
+    "Long Haul Flight": "Long Haul Flight >3700km (kgCO2e/passenger km)",
+    "Ferry": "Ferry (kgCO2e/passenger km)",
+    "Walking": "Walking (kgCO2e/mile)",
+    "Cycling": "Cycling (kgCO2e/mile)"
+  };
+
+  // Fixed activity keys for non-travel sheets
+  const KEYS = {
+    ELECTRICITY: "Electricity (UK grid, kgCO2e/kWh)",
+    GAS: "Natural Gas (kgCO2e/kWh)",
+    CLOUD: "Cloud/IT Services (kgCO2e/£ spend)",
+    PGS: "Purchased Goods & Services (kgCO2e/£ spend)",
+    HOTEL: "Hotel Stay (kgCO2e/night)",
+    COURIER: "Courier (kgCO2e/kg_km)"
+  };
+
+  // Placeholder fallback factors (will be replaced when DEFRA factors are loaded)
+  const FALLBACKS = {
+    [KEYS.ELECTRICITY]: 0.193,
+    [KEYS.GAS]: 0.183,
+    [MODE_TO_KEY["Car - Petrol"]]: 0.280,
+    [MODE_TO_KEY["Car - Diesel"]]: 0.300,
+    [MODE_TO_KEY["Car - EV"]]: 0.060,
+    [MODE_TO_KEY["Car - Hybrid"]]: 0.180,
+    [MODE_TO_KEY["Motorcycle"]]: 0.180,
+    [MODE_TO_KEY["Taxi"]]: 0.300,
+    [MODE_TO_KEY["Train"]]: 0.041,
+    [MODE_TO_KEY["Bus - Local"]]: 0.170,
+    [MODE_TO_KEY["Bus - Coach"]]: 0.100,
+    [MODE_TO_KEY["Short Haul Flight"]]: 0.158,
+    [MODE_TO_KEY["Long Haul Flight"]]: 0.146,
+    [MODE_TO_KEY["Ferry"]]: 0.115,
+    [KEYS.HOTEL]: 16.0,
+    [KEYS.COURIER]: 0.500,
+    [KEYS.CLOUD]: 0.040,
+    [KEYS.PGS]: 0.250
+  };
+
+  // DEFRA factors map populated from file/paste: { Activity: { unit, factor } }
+  let DEFRA = {};
+
+  const state = {
+    Electricity_Use: [],
+    Gas_Use: [],
+    Business_Travel: [],
+    Commuting: [],
+    Cloud_Services: [],
+    Purchased_Services: [],
+    Hotels: [],
+    Couriers: [],
+    baselineYear: YEARS[0],
+    recentYear: YEARS[1]
+  };
+
+  // -----------------------
+  // Local storage
+  // -----------------------
+  const LS_KEY = 'vaamg_carbon_v1';
+  function saveState() {
+    localStorage.setItem(LS_KEY, JSON.stringify({ state, DEFRA }));
+  }
+  function loadState() {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        Object.assign(state, saved.state || {});
+        DEFRA = saved.DEFRA || {};
+      }
+    } catch {}
+  }
+
+  // -----------------------
+  // DEFRA factor loading
+  // -----------------------
+  function setFactorsStatus() {
+    const loaded = Object.keys(DEFRA).length;
+    const badge = $('#factorsStatus');
+    const status = $('#statusBadge');
+    if (loaded > 0) {
+      badge.textContent = `Loaded ${loaded} activities`;
+      badge.className = 'pill pill-good';
+      status.textContent = 'Using DEFRA full set';
+      status.className = 'pill pill-good';
+    } else {
+      badge.textContent = 'No factors loaded (using placeholders)';
+      badge.className = 'pill pill-warn';
+      status.textContent = 'Using placeholder factors';
+      status.className = 'pill pill-warn';
+    }
+  }
+
+  function parseDefraRows(rows) {
+    const out = {};
+    const A = (s) => String(s || '').trim();
+    for (const r of rows) {
+      const act = A(r['Activity'] ?? r['activity']);
+      const unit = A(r['Unit'] ?? r['unit']);
+      const fstr = A(r['Factor (kgCO2e per unit)'] ?? r['kgCO2e per unit'] ?? r['factor']);
+      if (!act || !fstr) continue;
+      const factor = parseFloat(fstr);
+      if (!isFinite(factor)) continue;
+      out[act] = { unit, factor };
+    }
+    return out;
+  }
+
+  function previewDefra(defra) {
+    const first10 = Object.entries(defra).slice(0,10).map(([k,v]) => `${k} | ${v.unit} | ${v.factor}`).join('\n');
+    $('#factorsPreview').textContent = first10 || '(none)';
+  }
+
+  // factor lookup with fallback
+  function getFactor(activityKey) {
+    const entry = DEFRA[activityKey];
+    return entry ? entry.factor : (FALLBACKS[activityKey] ?? 0);
+  }
+  function isFallback(activityKey) {
+    return !DEFRA[activityKey];
+  }
+
+  // -----------------------
+  // UI Elements init
+  // -----------------------
+  function fillYearSelects() {
+    const by = $('#baselineYear');
+    const ry = $('#recentYear');
+    for (const y of YEARS) {
+      const o1 = document.createElement('option'); o1.value = y; o1.textContent = y; by.appendChild(o1);
+      const o2 = document.createElement('option'); o2.value = y; o2.textContent = y; ry.appendChild(o2);
+    }
+    by.value = state.baselineYear; ry.value = state.recentYear;
+    by.addEventListener('change', () => { state.baselineYear = parseInt(by.value,10); recomputeAndRender(); saveState(); });
+    ry.addEventListener('change', () => { state.recentYear = parseInt(ry.value,10); recomputeAndRender(); saveState(); });
+  }
+
+  function makeYearSelect(value) {
+    const sel = document.createElement('select'); sel.className = 'select';
+    for (const y of YEARS) { const o=document.createElement('option');o.value=y;o.textContent=y; sel.appendChild(o); }
+    sel.value = value ?? YEARS[0];
+    return sel;
+  }
+  function makeModeSelect(value) {
+    const sel = document.createElement('select'); sel.className = 'select';
+    for (const m of MODES) { const o=document.createElement('option');o.value=m;o.textContent=m; sel.appendChild(o); }
+    sel.value = value ?? MODES[0];
+    return sel;
+  }
+  function makeUnitSelect(value, allowed=["miles","km"]) {
+    const sel = document.createElement('select'); sel.className = 'select';
+    for (const u of allowed) { const o=document.createElement('option');o.value=u;o.textContent=u; sel.appendChild(o); }
+    sel.value = value ?? allowed[0];
+    return sel;
+  }
+  function makeSupplierSelect(value) {
+    const sel = document.createElement('select'); sel.className = 'select';
+    for (const s of SUPPLIERS) { const o=document.createElement('option');o.value=s;o.textContent=s; sel.appendChild(o); }
+    sel.value = value ?? SUPPLIERS[0];
+    return sel;
+  }
+  function makeCategorySelect(value) {
+    const sel = document.createElement('select'); sel.className = 'select';
+    for (const c of CATEGORIES) { const o=document.createElement('option');o.value=c;o.textContent=c; sel.appendChild(o); }
+    sel.value = value ?? CATEGORIES[0];
+    return sel;
+  }
+
+  function makeNumber(value, min=0, step='any') {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = String(min); inp.step = String(step); inp.value = value ?? '';
+    inp.className = 'input';
+    return inp;
+  }
+  function makeText(value) {
+    const inp = document.createElement('input'); inp.type = 'text'; inp.value = value ?? ''; inp.className = 'input'; return inp;
+  }
+
+  function mkRowBtn(text, cls, onClick) {
+    const b = document.createElement('button'); b.textContent=text; b.className=cls; b.addEventListener('click', onClick); return b;
+  }
+
+  // -----------------------
+  // Generic table builder
+  // -----------------------
+  function renderTable(container, cfg) {
+    container.innerHTML = '';
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    for (const col of cfg.columns) {
+      const th = document.createElement('th'); th.textContent = col.label; trh.appendChild(th);
+    }
+    const thAct = document.createElement('th'); thAct.textContent = 'Actions'; trh.appendChild(thAct);
+    thead.appendChild(trh); table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
+    function addRow(rowData, idx) {
+      const tr = document.createElement('tr');
+      const local = rowData || deepClone(cfg.emptyRow());
+
+      cfg.columns.forEach((col) => {
+        const td = document.createElement('td');
+        let el;
+        switch(col.type) {
+          case 'year': el = makeYearSelect(local[col.key]); break;
+          case 'mode': el = makeModeSelect(local[col.key]); break;
+          case 'unit': el = makeUnitSelect(local[col.key], col.allowed || ["miles","km"]); break;
+          case 'supplier': el = makeSupplierSelect(local[col.key]); break;
+          case 'category': el = makeCategorySelect(local[col.key]); break;
+          case 'number': el = makeNumber(local[col.key]); break;
+          case 'text': el = makeText(local[col.key]); break;
+          case 'readonly': {
+            el = document.createElement('div'); el.className = 'mono'; el.textContent = col.format ? col.format(local) : (local[col.key] ?? '');
+            break;
+          }
+          default: el = makeText(local[col.key]);
+        }
+        if (col.help) { el.title = col.help; }
+        td.appendChild(el);
+        tr.appendChild(td);
+
+        // bind change handler
+        if (col.type !== 'readonly') {
+          el.addEventListener('input', () => { local[col.key] = (col.type==='number') ? toNumber(el.value) : el.value; recalcRow(local); save(); });
+          el.addEventListener('change', () => { local[col.key] = (col.type==='number') ? toNumber(el.value) : el.value; recalcRow(local); save(); });
+        }
+
+        function recalcRow(obj) {
+          if (cfg.recalc) cfg.recalc(obj);
+          // refresh readonly cells for this row
+          $$('td', tr).forEach(() => {});
+          // rebuild the row to update readonly values
+          const i = cfg.rows.indexOf(local);
+          if (i > -1) { cfg.rows[i] = obj; }
+          render();
+        }
+      });
+
+      const tdAct = document.createElement('td');
+      tdAct.appendChild(mkRowBtn('Delete', 'btn-danger', () => {
+        const i = cfg.rows.indexOf(local);
+        if (i > -1) { cfg.rows.splice(i,1); save(); render(); }
+      }));
+      tr.appendChild(tdAct);
+
+      tbody.appendChild(tr);
+    }
+
+    function render() {
+      tbody.innerHTML = '';
+      cfg.rows.forEach((r, i) => addRow(r, i));
+    }
+
+    render();
+
+    table.appendChild(tbody);
+
+    const addBar = document.createElement('div'); addBar.className = 'mt-2 flex justify-end';
+    addBar.appendChild(mkRowBtn(`Add row`, 'btn', () => { cfg.rows.push(deepClone(cfg.emptyRow())); save(); render(); }));
+
+    container.appendChild(table);
+    container.appendChild(addBar);
+  }
+
+  // -----------------------
+  // Sheet configs
+  // -----------------------
+  function milesToKm(m) { return m * 1.60934; }
+  function kmToMiles(k) { return k / 1.60934; }
+
+  function recalcAll() { /* noop; computed on render */ }
+
+  const Sheets = {
+    Electricity_Use: {
+      rows: state.Electricity_Use,
+      emptyRow: () => ({ year: YEARS[0], kwh: 0, notes: '', factor: 0, tco2e: 0, scope: 'Scope 2' }),
+      recalc: (r) => {
+        const f = getFactor(KEYS.ELECTRICITY);
+        r.factor = f; r.tco2e = (toNumber(r.kwh) * f) / 1000;
+      },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'kwh', label:'kWh', type:'number' },
+        { key:'notes', label:'Location/Notes', type:'text' },
+        { key:'factor', label:'EF (kgCO2e/kWh)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.ELECTRICITY)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Gas_Use: {
+      rows: state.Gas_Use,
+      emptyRow: () => ({ year: YEARS[0], kwh: 0, notes: '', factor: 0, tco2e: 0, scope: 'Scope 1' }),
+      recalc: (r) => {
+        const f = getFactor(KEYS.GAS);
+        r.factor = f; r.tco2e = (toNumber(r.kwh) * f) / 1000;
+      },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'kwh', label:'kWh', type:'number' },
+        { key:'notes', label:'Location/Notes', type:'text' },
+        { key:'factor', label:'EF (kgCO2e/kWh)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.GAS)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Business_Travel: {
+      rows: state.Business_Travel,
+      emptyRow: () => ({ year: YEARS[0], mode: MODES[0], distance: 0, notes: '', unit:'miles', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => {
+        const key = MODE_TO_KEY[r.mode];
+        const f = getFactor(key);
+        r.factor = f;
+        const dist = toNumber(r.distance);
+        const isKmMode = (r.mode === 'Short Haul Flight' || r.mode === 'Long Haul Flight' || r.mode === 'Ferry');
+        if (isKmMode) {
+          const km = r.unit === 'miles' ? milesToKm(dist) : dist;
+          r.tco2e = (km * f) / 1000;
+        } else {
+          const miles = r.unit === 'km' ? kmToMiles(dist) : dist;
+          r.tco2e = (miles * f) / 1000;
+        }
+      },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'mode', label:'Mode', type:'mode' },
+        { key:'distance', label:'Miles/KM', type:'number' },
+        { key:'notes', label:'Notes', type:'text' },
+        { key:'unit', label:'Unit', type:'unit', allowed:['miles','km'] },
+        { key:'factor', label:'EF (see key)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(MODE_TO_KEY[r.mode])?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Commuting: {
+      rows: state.Commuting,
+      emptyRow: () => ({ year: YEARS[0], mode: MODES[0], distance: 0, notes: '', unit:'miles', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => Sheets.Business_Travel.recalc(r),
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'mode', label:'Mode', type:'mode' },
+        { key:'distance', label:'Miles/KM', type:'number' },
+        { key:'notes', label:'Notes', type:'text' },
+        { key:'unit', label:'Unit', type:'unit', allowed:['miles','km'] },
+        { key:'factor', label:'EF (see key)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(MODE_TO_KEY[r.mode])?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Cloud_Services: {
+      rows: state.Cloud_Services,
+      emptyRow: () => ({ year: YEARS[0], supplier: SUPPLIERS[0], spend: 0, notes: '', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => {
+        const f = getFactor(KEYS.CLOUD); r.factor=f; r.tco2e = (toNumber(r.spend)*f)/1000;
+      },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'supplier', label:'Supplier', type:'supplier' },
+        { key:'spend', label:'Spend £', type:'number' },
+        { key:'notes', label:'Notes', type:'text' },
+        { key:'factor', label:'EF (kgCO2e/£)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.CLOUD)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Purchased_Services: {
+      rows: state.Purchased_Services,
+      emptyRow: () => ({ year: YEARS[0], category: CATEGORIES[0], spend:0, notes:'', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => { const f=getFactor(KEYS.PGS); r.factor=f; r.tco2e=(toNumber(r.spend)*f)/1000; },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'category', label:'Category', type:'category' },
+        { key:'spend', label:'Spend £', type:'number' },
+        { key:'notes', label:'Notes', type:'text' },
+        { key:'factor', label:'EF (kgCO2e/£)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.PGS)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Hotels: {
+      rows: state.Hotels,
+      emptyRow: () => ({ year: YEARS[0], nights: 0, place:'', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => { const f=getFactor(KEYS.HOTEL); r.factor=f; r.tco2e=(toNumber(r.nights)*f)/1000; },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'nights', label:'Nights', type:'number' },
+        { key:'place', label:'Country/City', type:'text' },
+        { key:'factor', label:'EF (kgCO2e/night)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.HOTEL)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    },
+    Couriers: {
+      rows: state.Couriers,
+      emptyRow: () => ({ year: YEARS[0], kg:0, distance:0, unit:'km', factor:0, tco2e:0, scope:'Scope 3' }),
+      recalc: (r) => {
+        const f = getFactor(KEYS.COURIER); r.factor = f;
+        const kg = toNumber(r.kg); const d = toNumber(r.distance);
+        const km = (r.unit === 'miles') ? milesToKm(d) : d;
+        r.tco2e = (kg * km * f) / 1000;
+      },
+      columns: [
+        { key:'year', label:'Year', type:'year' },
+        { key:'kg', label:'Kg', type:'number' },
+        { key:'distance', label:'Distance', type:'number' },
+        { key:'unit', label:'Unit', type:'unit', allowed:['km','miles'] },
+        { key:'factor', label:'EF (kgCO2e/kg_km)', type:'readonly', format:(r)=>fmt(r.factor,6) + (isFallback(KEYS.COURIER)?' *':'') },
+        { key:'tco2e', label:'tCO2e', type:'readonly', format:(r)=>fmt(r.tco2e,6) },
+        { key:'scope', label:'Scope', type:'readonly' }
+      ]
+    }
+  };
+
+  // -----------------------
+  // Results computation
+  // -----------------------
+  function rollupByYear() {
+    const years = YEARS;
+    const byYear = {};
+    for (const y of years) byYear[y] = { s1:0, s2:0, s3:0, total:0 };
+
+    const add = (y, scope, t) => { if (!byYear[y]) byYear[y] = { s1:0,s2:0,s3:0,total:0 }; byYear[y][scope] += t; };
+
+    for (const r of state.Gas_Use) add(r.year,'s1', toNumber(r.tco2e));
+    for (const r of state.Electricity_Use) add(r.year,'s2', toNumber(r.tco2e));
+    const s3Sheets = ['Business_Travel','Commuting','Cloud_Services','Purchased_Services','Hotels','Couriers'];
+    for (const s of s3Sheets) for (const r of state[s]) add(r.year,'s3', toNumber(r.tco2e));
+
+    for (const y of years) byYear[y].total = byYear[y].s1 + byYear[y].s2 + byYear[y].s3;
+    return byYear;
+  }
+
+  function renderResults() {
+    const byYear = rollupByYear();
+    const table = $('#resultsTable');
+    const headers = ['Year','Scope 1 (tCO2e)','Scope 2 (tCO2e)','Scope 3 (tCO2e)','Total (tCO2e)'];
+    const rows = YEARS.map(y => [y, fmt(byYear[y].s1), fmt(byYear[y].s2), fmt(byYear[y].s3), fmt(byYear[y].total)]);
+
+    table.innerHTML = '<thead><tr>' + headers.map(h=>`<th>${h}</th>`).join('') + '</tr></thead>' +
+      '<tbody>' + rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('') + '</tbody>';
+
+    // CRP
+    const base = byYear[state.baselineYear]?.total ?? 0;
+    const curr = byYear[state.recentYear]?.total ?? 0;
+    $('#baselineTotal').textContent = fmt(base);
+    $('#currentTotal').textContent = fmt(curr);
+    const red = (base>0) ? (1 - (curr/base)) : 0;
+    $('#reductionPct').textContent = isFinite(red) ? (red*100).toFixed(1) + '%' : '–';
+  }
+
+  function recomputeAndRender() {
+    // recalc all rows
+    Object.values(Sheets).forEach(cfg => cfg.rows.forEach(r => cfg.recalc(r)));
+    renderActiveTab();
+    renderResults();
+  }
+
+  function save() { saveState(); renderResults(); }
+
+  // -----------------------
+  // Tabs & rendering
+  // -----------------------
+  let activeTab = 'Electricity_Use';
+  function renderActiveTab() {
+    const host = $('#tabs');
+    host.innerHTML = '';
+    const container = document.createElement('div');
+    renderTable(container, Sheets[activeTab]);
+    host.appendChild(container);
+  }
+  function setActive(tab) { activeTab = tab; $$("nav [data-tab]").forEach(b => b.classList.toggle('btn-primary', b.dataset.tab===tab)); renderActiveTab(); }
+
+  // -----------------------
+  // File/paste handlers
+  // -----------------------
+  $('#btnLoadFile').addEventListener('click', () => $('#defraFile').click());
+  $('#defraFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      Papa.parse(file, { header:true, complete: (res)=>{
+        DEFRA = parseDefraRows(res.data);
+        setFactorsStatus(); previewDefra(DEFRA); recomputeAndRender(); saveState();
+      }});
+    } else {
+      // XLSX path - read first sheet into JSON
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval:'' });
+      DEFRA = parseDefraRows(json);
+      setFactorsStatus(); previewDefra(DEFRA); recomputeAndRender(); saveState();
+    }
+    e.target.value = '';
+  });
+
+  $('#btnParsePaste').addEventListener('click', () => {
+    const text = $('#defraPaste').value.trim(); if (!text) return;
+    const res = Papa.parse(text, { header:true });
+    DEFRA = parseDefraRows(res.data);
+    setFactorsStatus(); previewDefra(DEFRA); recomputeAndRender(); saveState();
+  });
+
+  $('#btnClearFactors').addEventListener('click', () => {
+    DEFRA = {}; setFactorsStatus(); previewDefra(DEFRA); recomputeAndRender(); saveState();
+  });
+
+  // Export/Import JSON data
+  $('#btnExportData').addEventListener('click', () => {
+    download('vaamg-carbon-data.json', JSON.stringify({ state, DEFRA }, null, 2));
+  });
+  $('#btnImportData').addEventListener('click', () => $('#importDataInput').click());
+  $('#importDataInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const text = await file.text();
+    try { const obj = JSON.parse(text); Object.assign(state, obj.state||{}); DEFRA = obj.DEFRA||{}; } catch {}
+    setFactorsStatus(); previewDefra(DEFRA); recomputeAndRender(); saveState(); e.target.value='';
+  });
+
+  // Export results CSV
+  $('#btnExportResults').addEventListener('click', () => {
+    const byYear = rollupByYear();
+    const rows = YEARS.map(y => ({ Year:y, Scope1_tCO2e: byYear[y].s1, Scope2_tCO2e: byYear[y].s2, Scope3_tCO2e: byYear[y].s3, Total_tCO2e: byYear[y].total }));
+    downloadCSV('vaamg_results.csv', rows);
+  });
+
+  // -----------------------
+  // Init
+  // -----------------------
+  loadState();
+  fillYearSelects();
+  setFactorsStatus();
+
+  // initial rows for convenience (can delete)
+  if (state.Electricity_Use.length === 0) state.Electricity_Use.push({ year:YEARS[0], kwh:0, notes:'', factor:0, tco2e:0, scope:'Scope 2' });
+  if (state.Gas_Use.length === 0) state.Gas_Use.push({ year:YEARS[0], kwh:0, notes:'', factor:0, tco2e:0, scope:'Scope 1' });
+
+  // tabs
+  $$('nav [data-tab]').forEach(b => b.addEventListener('click', () => setActive(b.dataset.tab)));
+  setActive(activeTab);
+  recomputeAndRender();
+
+  </script>
+</body>
+</html>
