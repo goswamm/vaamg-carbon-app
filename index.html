@@ -161,8 +161,9 @@
   // AUTH (minimal)
   // -----------------------
   // Set a passphrase to enable the gate. Leave empty for no auth.
+  const ENABLE_GATE = false; // master switch: set to true to enable the gate
   const PASSPHRASE_PLAIN = '';
-  const GATE = { enabled: !!PASSPHRASE_PLAIN };
+  const GATE = { enabled: ENABLE_GATE };
   function showGate() { document.getElementById('authGate').classList.remove('hidden'); }
   function hideGate() { document.getElementById('authGate').classList.add('hidden'); }
   function tryUnlock(input) {
@@ -176,7 +177,7 @@
   }
 
   (function gateInit(){
-    if (!GATE.enabled) return; // disabled
+    if (!GATE.enabled) { const g=document.getElementById('authGate'); if (g) g.remove(); return; } // disabled
     const url = new URL(location.href);
     const key = url.searchParams.get('key');
     if (key && tryUnlock(key)) { hideGate(); return; }
