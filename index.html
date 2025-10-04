@@ -161,13 +161,17 @@
   // AUTH (minimal)
   // -----------------------
   // Set a passphrase to enable the gate. Leave empty for no auth.
-  const PASSPHRASE_PLAIN = 'CRP2024';
+  const PASSPHRASE_PLAIN = '';
   const GATE = { enabled: !!PASSPHRASE_PLAIN };
   function showGate() { document.getElementById('authGate').classList.remove('hidden'); }
   function hideGate() { document.getElementById('authGate').classList.add('hidden'); }
   function tryUnlock(input) {
     if (!GATE.enabled) return true;
-    if (input === PASSPHRASE_PLAIN) { sessionStorage.setItem('vaamg_gate_ok','1'); return true; }
+    const a = String(input || '').trim();
+    const b = String(PASSPHRASE_PLAIN || '').trim();
+    if (a === b) { sessionStorage.setItem('vaamg_gate_ok','1'); return true; }
+    return false;
+  }
     return false;
   }
 
@@ -178,12 +182,17 @@
     if (key && tryUnlock(key)) { hideGate(); return; }
     if (sessionStorage.getItem('vaamg_gate_ok')==='1') { hideGate(); return; }
     showGate();
-    document.getElementById('authSubmit').addEventListener('click', ()=>{
-      const ok = tryUnlock(document.getElementById('authInput').value);
-      document.getElementById('authStatus').textContent = ok ? '' : 'Wrong passphrase';
+    const inputEl = document.getElementById('authInput');
+    const submitEl = document.getElementById('authSubmit');
+    const cancelEl = document.getElementById('authCancel');
+    const statusEl = document.getElementById('authStatus');
+    submitEl.addEventListener('click', ()=>{
+      const ok = tryUnlock(inputEl.value);
+      statusEl.textContent = ok ? '' : 'Wrong passphrase';
       if (ok) hideGate();
     });
-    document.getElementById('authCancel').addEventListener('click', ()=>{ location.href='about:blank'; });
+    inputEl.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') submitEl.click(); });
+    cancelEl.addEventListener('click', ()=>{ location.href='about:blank'; });
   })();
 
   // -----------------------
